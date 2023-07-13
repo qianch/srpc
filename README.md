@@ -9,6 +9,7 @@
 <a href="https://github.com/sogou/srpc/releases"><img src="https://img.shields.io/github/v/release/sogou/srpc?color=379c9c&logoColor=ffffff&style=flat-square"/></a>
 <a href="https://github.com/sogou/srpc/actions?query=workflow%3A%22ci+build%22++"><img src="https://img.shields.io/github/actions/workflow/status/sogou/srpc/ci.yml?branch=master&color=379c9c&style=flat-square"/></a>
 
+### NEW !!!  👉 [SRPC tools : build Workflow and SRPC projects easily.](/tools/README.md)
 
 ## Introduction
 
@@ -65,7 +66,7 @@
   * For protobuf, you must install protobuf v3.11.0 or above by yourself.
   * For Workflow, it\`s added as dependency automatically via git submodule.
   * For snappy and lz4, source codes are also included as third\_party via git submodule.
-  * Workflow, snappy and lz4 can also be found via installed package in the system. If the submodule dependencies are not pulled in thirt_party, they will be searched from the default installation path of the system. The version of snappy is required v1.1.6 or above.
+  * Workflow, snappy and lz4 can also be found via installed package in the system. If the submodule dependencies are not pulled in third\_party, they will be searched from the default installation path of the system. The version of snappy is required v1.1.6 or above.
 * There is no difference in the srpc code under the Windows version, but users need to use the windows branch of Workflow
 
 ~~~sh
@@ -105,6 +106,19 @@ To install the srpc library for deployment:
 sudo apt-get install libsrpc
 ~~~~
 
+### Installation(Fedora Linux):
+srpc has been packaged for Fedora.
+
+To install the srpc library for development purposes:
+~~~~sh
+sudo dnf install srpc-devel
+~~~~
+
+To install the srpc library for deployment:
+~~~~sh
+sudo dnf install srpc
+~~~~
+
 ## Tutorial
 
 * [Step 1: Design IDL description file](/docs/en/docs-01-idl.md)
@@ -113,9 +127,10 @@ sudo apt-get install libsrpc
 * [Step 4: Use the Client](/docs/en/docs-04-client.md)
 * [Step 5: Understand asynchrous Context](/docs/en/docs-05-context.md)
 * [Step 6: Use it together with the Workflow](/docs/en/docs-06-workflow.md)
-* [Step 7: Common Usage of HTTP](/docs/en/docs-07-http.md)
+* [Step 7: Use Http with SRPC, TRPC and Thrift](/docs/en/docs-07-srpc-http.md)
 * [Step 8: Report Tracing to OpenTelemetry](/docs/en/docs-08-tracing.md)
 * [Step 9: Report Metrics to OpenTelemetry / Prometheus](/docs/en/docs-09-metrics.md)
+* [Step 10: Use HTTP with Workflow Style and SRPC Modules](/docs/docs-10-http-with-modules.md)
 
 Easy to compile tutorial with these commands:
 

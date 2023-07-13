@@ -1,6 +1,6 @@
 [English version](/docs/en/docs-06-workflow.md)
 
-## 与workflow异步框架的结合
+## 06 - 与workflow异步框架的结合
 ### 1. Server
 下面我们通过一个具体例子来呈现
 - Echo RPC在接收到请求时，向下游发起一次http请求
@@ -120,7 +120,7 @@ int main()
 
     // 2. 构造参数，填上upstream的名字
     RPCClientParams client_params = RPC_CLIENT_PARAMS_DEFAULT;
-    client_params.host = "srpc::echo_server"; // 这个scheme只用于upstream URI解析
+    client_params.host = "echo_server";
     client_params.port = 1412; // 这个port只用于upstream URI解析，不影响具体实例的选取
 
     // 3. 用参数创建client，其他用法与示例类似

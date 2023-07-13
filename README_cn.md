@@ -8,6 +8,7 @@
 <a href="https://github.com/sogou/srpc/releases"><img src="https://img.shields.io/github/v/release/sogou/srpc?color=379c9c&logoColor=ffffff&style=flat-square"/></a>
 <a href="https://github.com/sogou/srpc/actions?query=workflow%3A%22ci+build%22++"><img src="https://img.shields.io/github/actions/workflow/status/sogou/srpc/ci.yml?branch=master&color=379c9c&style=flat-square"/></a>
 
+### NEW !!!  👉 [SRPC tools : 一个帮你快速构建Workflow和SRPC项目的小工具.](/tools/README_cn.md) 
 
 ## Introduction
 #### SRPC是全搜狗业务线上使用的企业级RPC系统，目前每天承载上百亿的请求量，涵盖搜广推及其他类型业务。主要功能和特点：
@@ -69,6 +70,19 @@ cd srpc
 make
 ~~~
 
+### 安装（Fedora Linux）：
+srpc已为Fedora打包。
+
+为了开发目的安装srpc库：
+~~~sh
+sudo dnf install srpc-devel
+~~~
+
+要安装srpc库以进行部署，请执行以下操作：
+~~~sh
+sudo dnf install srpc
+~~~
+
 ## Tutorial
 
 * [第1步：设计IDL描述文件](docs/docs-01-idl.md)
@@ -77,9 +91,10 @@ make
 * [第4步：使用Client](docs/docs-04-client.md)
 * [第5步：了解异步Context](docs/docs-05-context.md)
 * [第6步：与workflow的结合使用](docs/docs-06-workflow.md)
-* [第7步：使用HTTP协议互通](docs/docs-07-http.md)
+* [第7步：使用SRPC发送HTTP协议](docs/docs-07-srpc-http.md)
 * [第8步：链路上报到OpenTelemetry](docs/docs-08-tracing.md)
 * [第9步：监控指标的使用与上报](docs/docs-09-metrics.md)
+* [第10步：附带生态模块功能的Workflow风格Http](/docs/docs-10-http-with-modules.md)
 
 简单的命令即可编译示例：
 

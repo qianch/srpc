@@ -1,6 +1,6 @@
 [中文版](/docs/docs-06-workflow.md)
 
-## Integrating with the asynchronous Workflow framework
+## 06 - Integrating with the asynchronous Workflow framework
 
 ### 1. Server
 
@@ -125,7 +125,7 @@ int main()
 
     // 2. create params and fill upstream name
     RPCClientParams client_params = RPC_CLIENT_PARAMS_DEFAULT;
-    client_params.host = "srpc::echo_server"; // this scheme only used when upstream URI parsing
+    client_params.host = "echo_server";
     client_params.port = 1412; // this port only used when upstream URI parsing and will not affect the select of instances
 
     // 3. construct client by params, the rest of usage is similar as other tutorials

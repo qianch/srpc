@@ -35,7 +35,7 @@ if (WIN32)
 		find_package(lz4)
 		if(lz4_FOUND)
 			set(LZ4_LIBRARY ${lz4_LIBRARIES})
-	    endif()
+		endif()
 	endif()
 	find_package(Snappy CONFIG REQUIRED)
 else ()
@@ -56,17 +56,6 @@ endif ()
 
 find_package(ZLIB REQUIRED)
 
-#if (APPLE)
-#	if (WORKFLOW_INCLUDE_DIR)
-#		set (WORKFLOW_INCLUDE_DIR ${Workflow_DIR}/_include)
-#		set (WORKFLOW_LIB_DIR ${Workflow_DIR}/_lib)
-#	else ()
-#		find_package(Workflow REQUIRED)
-#	endif ()
-#else ()
-#	find_package(Workflow REQUIRED)
-#endif()
-
 include_directories(
 	${OPENSSL_INCLUDE_DIR}
 	${CMAKE_CURRENT_BINARY_DIR}
@@ -74,8 +63,6 @@ include_directories(
 	${WORKFLOW_INCLUDE_DIR}
 	${SRPC_INCLUDE_DIR}
 )
-
-
 
 if (WIN32)
 	link_directories(${SRPC_LIB_DIR} ${WORKFLOW_LIB_DIR} ${Protobuf_LIB_DIR})
@@ -96,7 +83,6 @@ add_custom_target(
 	COMMAND ${SRPC_GEN_PROGRAM} protobuf ${PROJECT_SOURCE_DIR}/helloworld.proto ${PROJECT_SOURCE_DIR}
 	COMMENT "srpc generator..."
 )
-
 
 if (WIN32)
 	if (SRPC_TUTORIAL_BUILD_STATIC_RUNTIME)
@@ -136,9 +122,13 @@ set(TUTORIAL_PB_LIST
 )
 
 if (APPLE)
+	set(CMAKE_FIND_LIBRARY_SUFFIXES ".a" ${CMAKE_FIND_LIBRARY_SUFFIXES})
+	find_library(Workflow_LIB workflow HINTS ../workflow/_lib)
+	find_library(Srpc_LIB srpc HINTS ../_lib)
+
 	set(SRPC_LIB
-		srpc
-		workflow
+		${Srpc_LIB}
+		${Workflow_LIB}
 		pthread
 		OpenSSL::SSL
 		OpenSSL::Crypto
@@ -209,4 +199,19 @@ foreach(src ${TUTORIAL_HELLOWORLD_LIST})
 	target_link_libraries(${bin_name} ${SRPC_LIB})
 	add_dependencies(${bin_name} TURORIAL_GEN)
 endforeach()
+
+if (NOT WIN32)
+	set(TUTORIAL_HTTP_LIST
+		tutorial-17-http_server
+		tutorial-18-http_client
+	)
+
+	foreach(src ${TUTORIAL_HTTP_LIST})
+		string(REPLACE "-" ";" arr ${src})
+		list(GET arr -1 bin_name)
+		add_executable(${bin_name} ${src}.cc)
+		target_link_libraries(${bin_name} ${SRPC_LIB})
+		add_dependencies(${bin_name} TURORIAL_GEN)
+	endforeach()
+endif ()
 

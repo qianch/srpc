@@ -74,9 +74,11 @@ bool Generator::init_file_names(const std::string& idl_file, const char *out_dir
 	return true;
 }
 
-bool Generator::generate(const std::string& idl_file, struct GeneratorParams params)
+bool Generator::generate(struct GeneratorParams& params)
 {
-	if (this->parser.parse(idl_file, this->info) == false)
+	this->info.input_dir = params.input_dir;
+
+	if (this->parser.parse(params.idl_file, this->info) == false)
 	{
 		fprintf(stderr, "[Generator Error] parse failed.\n");
 		return false;
@@ -88,12 +90,13 @@ bool Generator::generate(const std::string& idl_file, struct GeneratorParams par
 		return false;
 	}
 
-	this->generate_skeleton(this->info.file_name);
+	if (params.generate_skeleton == true)
+		this->generate_skeleton(this->info.file_name);
 
 	return true;
 }
 
-bool Generator::generate_header(idl_info& cur_info, struct GeneratorParams params)
+bool Generator::generate_header(idl_info& cur_info, struct GeneratorParams& params)
 {
 	for (auto& sub_info : cur_info.include_list)
 	{
@@ -174,16 +177,6 @@ void Generator::generate_skeleton(const std::string& idl_file)
 
 	std::string idl_file_name = str.substr(0, pos);
 
-	this->server_cpp_file = this->out_dir;
-	this->server_cpp_file.append("server");
-	this->server_cpp_file.append(this->is_thrift ? ".thrift_skeleton." : ".pb_skeleton.");
-	this->server_cpp_file.append("cc");
-
-	this->client_cpp_file = this->out_dir;
-	this->client_cpp_file.append("client");
-	this->client_cpp_file.append(this->is_thrift ? ".thrift_skeleton." : ".pb_skeleton.");
-	this->client_cpp_file.append("cc");
-
 	// server.skeleton.cc
 	this->generate_server_cpp_file(this->info, idl_file_name);
 	// client.skeleton.cc
@@ -209,7 +202,7 @@ void Generator::thrift_replace_include(const idl_info& cur_info, std::vector<rpc
 					SGenUtil::replace(param.type_name, desc.block_name, "int32_t");
 			}
 
-			for (const auto sub_info : cur_info.include_list)
+			for (const auto& sub_info : cur_info.include_list)
 			{
 				for (const auto& desc : sub_info.desc_list)
 				{
@@ -222,7 +215,7 @@ void Generator::thrift_replace_include(const idl_info& cur_info, std::vector<rpc
 		auto pos = param.type_name.find('.');
 		if (pos != std::string::npos)
 		{
-			for (const auto sub_info : cur_info.include_list)
+			for (const auto& sub_info : cur_info.include_list)
 			{
 				if (sub_info.package_name.empty())
 					continue;
@@ -366,9 +359,16 @@ bool Generator::generate_srpc_file(const idl_info& cur_info)
 	return true;
 }
 
-void Generator::generate_server_cpp_file(const idl_info& cur_info, const std::string& idl_file_name)
+bool Generator::generate_server_cpp_file(const idl_info& cur_info,
+										 const std::string& idl_file_name)
 {
-	this->printer.open(this->server_cpp_file);
+	this->server_cpp_file = this->out_dir;
+	this->server_cpp_file.append("server");
+	this->server_cpp_file.append(this->is_thrift ? ".thrift_skeleton." : ".pb_skeleton.");
+	this->server_cpp_file.append("cc");
+
+	if (this->printer.open(this->server_cpp_file) == false)
+		return false;
 
 	this->printer.print_server_file_include(idl_file_name);
 
@@ -391,6 +391,8 @@ void Generator::generate_server_cpp_file(const idl_info& cur_info, const std::st
 	}
 
 	this->printer.print_server_main_begin();
+	this->printer.print_server_main_address();
+
 	for (const auto& desc : cur_info.desc_list)
 	{
 		if (desc.block_type != "service")
@@ -400,13 +402,22 @@ void Generator::generate_server_cpp_file(const idl_info& cur_info, const std::st
 	}
 
 	this->printer.print_server_main_end();
-
+	this->printer.print_server_main_return();
 	this->printer.close();
+
+	return true;
 }
 
-void Generator::generate_client_cpp_file(const idl_info& cur_info, const std::string& idl_file_name)
+bool Generator::generate_client_cpp_file(const idl_info& cur_info,
+										 const std::string& idl_file_name)
 {
-	this->printer.open(this->client_cpp_file);
+	this->client_cpp_file = this->out_dir;
+	this->client_cpp_file.append("client");
+	this->client_cpp_file.append(this->is_thrift ? ".thrift_skeleton." : ".pb_skeleton.");
+	this->client_cpp_file.append("cc");
+
+	if (this->printer.open(this->client_cpp_file) == false)
+		return false;
 
 	this->printer.print_client_file_include(idl_file_name);
 
@@ -425,6 +436,8 @@ void Generator::generate_client_cpp_file(const idl_info& cur_info, const std::st
 	}
 
 	this->printer.print_client_main_begin();
+	this->printer.print_client_main_address();
+
 	int id = 0;
 
 	for (const auto& desc : cur_info.desc_list)
@@ -462,5 +475,7 @@ void Generator::generate_client_cpp_file(const idl_info& cur_info, const std::st
 
 	this->printer.print_client_main_end();
 	this->printer.close();
+
+	return true;
 }
 
