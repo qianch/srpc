@@ -22,6 +22,7 @@
 #include <google/protobuf/io/zero_copy_stream_impl_lite.h>
 #include <workflow/HttpUtil.h>
 #include <workflow/StringUtil.h>
+#include <workflow/json_parser.h>
 #include "rpc_message_trpc.h"
 #include "rpc_meta_trpc.pb.h"
 #include "rpc_basic.h"
@@ -166,6 +167,155 @@ static std::string GetHttpCompressTypeStr(int type)
 	}
 
 	return "";
+}
+
+static int Base64Encode(const std::string& in, std::string& out)
+{
+	size_t len = in.length();
+	size_t base64_len = (len + 2) / 3 * 4;
+	const unsigned char *f = (const unsigned char *)in.c_str();
+
+	out.resize(base64_len + 1);
+	EVP_EncodeBlock((unsigned char *)&out[0], f, len);
+	out.pop_back();
+
+	return 0;
+}
+
+static int Base64Decode(const char *in, size_t len, std::string& out)
+{
+	size_t origin_len = (len + 3) / 4 * 3;
+	const unsigned char *f = (const unsigned char *)in;
+	int ret;
+	int zeros = 0;
+
+	out.resize(origin_len);
+	ret = EVP_DecodeBlock((unsigned char *)&out[0], f, len);
+
+	if (ret < 0)
+		return ret;
+
+	while (len != 0 && in[--len] == '=')
+		zeros++;
+
+	if (zeros > 2)
+		return -1;
+
+	out.resize(ret - zeros);
+	return 0;
+}
+
+static std::string JsonEscape(const std::string& in)
+{
+	std::string out;
+	out.reserve(in.size());
+
+	for (char c : in)
+	{
+		switch (c)
+		{
+		case '\"':
+			out.append("\\\"");
+			break;
+
+		case '\\':
+			out.append("\\\\");
+			break;
+
+		case '/':
+			out.append("\\/");
+			break;
+
+		case '\b':
+			out.append("\\b");
+			break;
+
+		case '\f':
+			out.append("\\f");
+			break;
+
+		case '\n':
+			out.append("\\n");
+			break;
+
+		case '\r':
+			out.append("\\r");
+			break;
+
+		case '\t':
+			out.append("\\t");
+			break;
+
+		default:
+			out.push_back(c);
+			break;
+		}
+	}
+
+	return out;
+}
+
+using TransInfoMap = ::google::protobuf::Map<::std::string, ::std::string>;
+static int DecodeTransInfo(const std::string& content, TransInfoMap& map)
+{
+	json_value_t *json;
+	json_object_t *obj;
+	const json_value_t *value;
+	const char *name, *str;
+	size_t len;
+	std::string decoded;
+	int errno_bak = errno;
+
+	errno = EBADMSG;
+	json = json_value_parse(content.c_str());
+	if (json == nullptr)
+		return -1;
+
+	errno = errno_bak;
+
+	if (json_value_type(json) != JSON_VALUE_OBJECT)
+	{
+		json_value_destroy(json);
+		return -1;
+	}
+
+	obj = json_value_object(json);
+	json_object_for_each(name, value, obj)
+	{
+		str = json_value_string(value);
+		if (!name || !str)
+			continue;
+
+		len = strlen(str);
+		if (Base64Decode(str, len, decoded) == 0)
+			map[name].assign(std::move(decoded));
+		else
+			map[name].assign(str, len);
+	}
+
+	json_value_destroy(json);
+	return 0;
+}
+
+static std::string EncodeTransInfo(const TransInfoMap& map)
+{
+	std::string s;
+	std::string encoded;
+
+	s.append("{");
+	for (const auto& kv : map)
+	{
+		Base64Encode(kv.second, encoded);
+		s.append("\"").append(JsonEscape(kv.first)).append("\":");
+		s.append("\"").append(encoded).append("\",");
+	}
+
+	if (s.back() == ',')
+		s.back() = '}';
+	else
+		s.push_back('}');
+
+	return s;
 }
 
 static constexpr const char *kTypePrefix = "type.googleapis.com";
@@ -397,13 +547,9 @@ bool TRPCResponse::deserialize_meta()
 	if (!meta->ParseFromArray(this->meta_buf, (int)this->meta_len))
 		return false;
 
-	this->srpc_status_code = RPCStatusOK;
-
-	if (meta->ret() != TrpcRetCode::TRPC_INVOKE_SUCCESS)
-	{
-		this->srpc_status_code = meta->ret();
-		this->srpc_error_msg = meta->error_msg();
-	}
+	this->srpc_status_code = this->status_code_trpc_srpc(meta->ret());
+	if (!meta->error_msg().empty())
+		this->srpc_error_msg = meta->error_msg().data();
 
 	return true;
 }
@@ -426,15 +572,12 @@ bool TRPCResponse::serialize_meta()
 	meta->set_version(TrpcProtoVersion::TRPC_PROTO_V1);
 	meta->set_call_type(TrpcCallType::TRPC_UNARY_CALL);
 
+	meta->set_ret(this->status_code_srpc_trpc(this->srpc_status_code));
+//	meta->set_error_msg(this->error_msg_srpc_trpc(this->srpc_status_code));
+	meta->set_error_msg(this->srpc_error_msg);
+
 	this->meta_len = meta->ByteSizeLong();
 	this->meta_buf = new char[this->meta_len];
-	if (this->srpc_status_code != RPCStatusOK)
-	{
-		meta->set_ret(this->status_code_srpc_trpc(this->srpc_status_code)); //TODO
-		meta->set_error_msg(this->error_msg_srpc_trpc(this->srpc_status_code));
-		// this->srpc_error_msg
-	}
-
 	return meta->SerializeToArray(this->meta_buf, (int)this->meta_len);
 }
 
@@ -498,9 +641,73 @@ inline int TRPCMessage::data_type_srpc_trpc(int srpc_data_type) const
 	}
 }
 
-int TRPCMessage::status_code_srpc_trpc(int srpc_status_code) const
+inline int TRPCMessage::status_code_srpc_trpc(int srpc_status_code) const
 {
-	return 0;//TODO
+	switch (srpc_status_code)
+	{
+	case RPCStatusOK:
+		return TrpcRetCode::TRPC_INVOKE_SUCCESS;
+	case RPCStatusServiceNotFound:
+		return TrpcRetCode::TRPC_SERVER_NOSERVICE_ERR;
+	case RPCStatusMethodNotFound:
+		return TrpcRetCode::TRPC_SERVER_NOFUNC_ERR;
+	case RPCStatusURIInvalid:
+	case RPCStatusMetaError:
+	case RPCStatusReqCompressSizeInvalid:
+	case RPCStatusReqCompressNotSupported:
+	case RPCStatusReqCompressError:
+	case RPCStatusReqSerializeError:
+		return TrpcRetCode::TRPC_CLIENT_ENCODE_ERR;
+	case RPCStatusReqDecompressSizeInvalid:
+	case RPCStatusReqDecompressNotSupported:
+	case RPCStatusReqDecompressError:
+	case RPCStatusReqDeserializeError:
+		return TrpcRetCode::TRPC_SERVER_DECODE_ERR;
+	case RPCStatusRespCompressSizeInvalid:
+	case RPCStatusRespCompressNotSupported:
+	case RPCStatusRespCompressError:
+	case RPCStatusRespSerializeError:
+		return TrpcRetCode::TRPC_SERVER_ENCODE_ERR;
+	case RPCStatusRespDecompressSizeInvalid:
+	case RPCStatusRespDecompressNotSupported:
+	case RPCStatusRespDecompressError:
+	case RPCStatusRespDeserializeError:
+		return TrpcRetCode::TRPC_CLIENT_DECODE_ERR;
+	case RPCStatusUpstreamFailed:
+	case RPCStatusDNSError:
+		return TrpcRetCode::TRPC_CLIENT_ROUTER_ERR;
+	case RPCStatusSystemError:
+		return TrpcRetCode::TRPC_SERVER_SYSTEM_ERR;
+//		return TrpcRetCode::TRPC_CLINET_NETWORK_ERR;
+	default:
+		return TrpcRetCode::TRPC_INVOKE_UNKNOWN_ERR;
+	}
+}
+
+inline int TRPCMessage::status_code_trpc_srpc(int trpc_ret_code) const
+{
+	switch (trpc_ret_code)
+	{
+	case TrpcRetCode::TRPC_INVOKE_SUCCESS:
+		return RPCStatusOK;
+	case TrpcRetCode::TRPC_SERVER_NOSERVICE_ERR:
+		return RPCStatusServiceNotFound;
+	case TrpcRetCode::TRPC_SERVER_NOFUNC_ERR:
+		return RPCStatusMethodNotFound;
+	case TrpcRetCode::TRPC_CLIENT_ENCODE_ERR:
+		return RPCStatusReqSerializeError;
+	case TrpcRetCode::TRPC_SERVER_DECODE_ERR:
+		return RPCStatusReqDeserializeError;
+	case TrpcRetCode::TRPC_SERVER_ENCODE_ERR:
+		return RPCStatusRespSerializeError;
+	case TrpcRetCode::TRPC_CLIENT_DECODE_ERR:
+		return RPCStatusRespDeserializeError;
+	case TrpcRetCode::TRPC_CLIENT_ROUTER_ERR:
+		return RPCStatusUpstreamFailed;
+//		return RPCStatusDNSError;
+	default:
+		return RPCStatusSystemError;
+	}
 }
 
 const char *TRPCMessage::error_msg_srpc_trpc(int srpc_status_code) const
@@ -576,6 +783,13 @@ void TRPCRequest::set_method_name(const std::string& method_name)
 	RequestProtocol *meta = static_cast<RequestProtocol *>(this->meta);
 
 	meta->set_func(method_name);
+}
+
+void TRPCRequest::set_callee_timeout(int timeout)
+{
+	RequestProtocol *meta = static_cast<RequestProtocol *>(this->meta);
+
+	meta->set_timeout(timeout);
 }
 
 void TRPCRequest::set_caller_name(const std::string& caller_name)
@@ -857,12 +1071,77 @@ int TRPCMessage::decompress()
 	return status_code;
 }
 
+static std::string set_trace_parent(std::string& trace, std::string& span,
+									const RPCModuleData& data)
+{
+	std::string str = "00-"; // set version
+
+	char trace_id_buf[SRPC_TRACEID_SIZE * 2 + 1];
+	TRACE_ID_BIN_TO_HEX((uint64_t *)trace.data(), trace_id_buf);
+	str.append(trace_id_buf);
+	str.append("-");
+
+	char span_id_buf[SRPC_SPANID_SIZE * 2 + 1];
+	SPAN_ID_BIN_TO_HEX((uint64_t *)span.data(), span_id_buf);
+	str.append(span_id_buf);
+	str.append("-");
+
+	str.append("01"); // set traceflag : sampled
+
+	return str;
+}
+
 bool TRPCRequest::set_meta_module_data(const RPCModuleData& data)
 {
 	RequestProtocol *meta = static_cast<RequestProtocol *>(this->meta);
+	std::string trace;
+	std::string span;
+	int flag = 0;
 
-	for (auto & pair : data)
-		meta->mutable_trans_info()->insert({pair.first, pair.second});
+	for (const auto & pair : data)
+	{
+		if (pair.first.compare(SRPC_TRACE_ID) == 0)
+		{
+			trace = pair.second;
+			flag |= 1;
+		}
+		else if (pair.first.compare(SRPC_SPAN_ID) == 0)
+		{
+			span = pair.second;
+			flag |= (1 << 1);
+		}
+		else
+			meta->mutable_trans_info()->insert({pair.first, pair.second});
+	}
+
+	if (flag == 3)
+		meta->mutable_trans_info()->insert({OTLP_TRACE_PARENT,
+											set_trace_parent(trace, span, data)});
+	return true;
+}
+
+static bool get_trace_parent(const std::string& str, RPCModuleData& data)
+{
+	// only support version = 00 : "00-" trace-id "-" parent-id "-" trace-flags
+	size_t begin = OTLP_TRACE_VERSION_SIZE;
+
+	if (str.length() < 55 || str.substr(0, begin).compare("00") != 0)
+		return false;
+
+//	data[OTLP_TRACE_VERSION] = "00";
+
+	uint64_t trace[2];
+	begin += 1;
+	TRACE_ID_HEX_TO_BIN(str.substr(begin, SRPC_TRACEID_SIZE * 2).data(), trace);
+	data[SRPC_TRACE_ID] = std::string((char *)trace, SRPC_TRACEID_SIZE);
+
+	uint64_t span[1];
+	begin += SRPC_TRACEID_SIZE * 2 + 1;
+	SPAN_ID_HEX_TO_BIN(str.substr(begin, SRPC_SPANID_SIZE * 2).data(), span);
+	data[SRPC_SPAN_ID] = std::string((char *)span, SRPC_SPANID_SIZE);
+
+//	begin += SRPC_SPANID_SIZE + 1;
+//	data[OTLP_TRACE_FLAG] = str.substr(begin);
 
 	return true;
 }
@@ -871,8 +1150,15 @@ bool TRPCRequest::get_meta_module_data(RPCModuleData& data) const
 {
 	RequestProtocol *meta = static_cast<RequestProtocol *>(this->meta);
 
-	for (auto & pair : meta->trans_info())
-		data.insert(pair);
+	for (const auto & pair : meta->trans_info())
+	{
+		if (pair.first.compare(OTLP_TRACE_PARENT) == 0)
+			get_trace_parent(pair.second, data);
+		else if (pair.first.compare(OTLP_TRACE_STATE) == 0)
+			;// TODO: support tracestate
+		else
+			data.insert(pair);
+	}
 
 	return true;
 }
@@ -894,7 +1180,7 @@ bool TRPCResponse::set_meta_module_data(const RPCModuleData& data)
 {
 	ResponseProtocol *meta = static_cast<ResponseProtocol *>(this->meta);
 
-	for (auto & pair : data)
+	for (const auto & pair : data)
 		meta->mutable_trans_info()->insert({pair.first, pair.second});
 
 	return true;
@@ -904,7 +1190,7 @@ bool TRPCResponse::get_meta_module_data(RPCModuleData& data) const
 {
 	ResponseProtocol *meta = static_cast<ResponseProtocol *>(this->meta);
 
-	for (auto & pair : meta->trans_info())
+	for (const auto & pair : meta->trans_info())
 		data.insert(pair);
 
 	return true;
@@ -943,6 +1229,10 @@ bool TRPCHttpRequest::serialize_meta()
 	set_header_pair(TRPCHttpHeaders::Callee, this->get_method_name());
 	set_header_pair(TRPCHttpHeaders::Func, this->get_service_name());
 	set_header_pair(TRPCHttpHeaders::Caller, this->get_caller_name());
+
+	auto *req_meta = (RequestProtocol *)this->meta;
+	set_header_pair(TRPCHttpHeaders::TransInfo,
+					EncodeTransInfo(req_meta->trans_info()));
 
 	const void *buffer;
 	size_t buflen;
@@ -992,7 +1282,7 @@ bool TRPCHttpRequest::deserialize_meta()
 			meta->set_message_type(std::atoi(value.c_str()));
 			break;
 		case TRPCHttpHeadersCode::TransInfo:
-			// TODO decode json
+			DecodeTransInfo(value, *meta->mutable_trans_info());
 			break;
 		default:
 			break;
@@ -1127,6 +1417,9 @@ bool TRPCHttpResponse::serialize_meta()
 
 	set_header_pair("Connection", "Keep-Alive");
 
+	set_header_pair(TRPCHttpHeaders::TransInfo,
+					EncodeTransInfo(meta->trans_info()));
+
 	const void *buffer;
 	size_t buflen;
 
@@ -1174,7 +1467,7 @@ bool TRPCHttpResponse::deserialize_meta()
 			meta->set_message_type(std::atoi(value.c_str()));
 			break;
 		case TRPCHttpHeadersCode::TransInfo:
-			// TODO decode json
+			DecodeTransInfo(value, *meta->mutable_trans_info());
 			break;
 		default:
 			break;
@@ -1205,22 +1498,22 @@ bool TRPCHttpResponse::deserialize_meta()
 
 bool TRPCHttpRequest::set_meta_module_data(const RPCModuleData& data)
 {
-	return http_set_header_module_data(data, this);
+	return this->TRPCRequest::set_meta_module_data(data);
 }
 
 bool TRPCHttpRequest::get_meta_module_data(RPCModuleData& data) const
 {
-	return http_get_header_module_data(this, data);
+	return this->TRPCRequest::get_meta_module_data(data);
 }
 
 bool TRPCHttpResponse::set_meta_module_data(const RPCModuleData& data)
 {
-	return http_set_header_module_data(data, this);
+	return this->TRPCResponse::set_meta_module_data(data);
 }
 
 bool TRPCHttpResponse::get_meta_module_data(RPCModuleData& data) const
 {
-	return http_get_header_module_data(this, data);
+	return this->TRPCResponse::get_meta_module_data(data);
 }
 
 bool TRPCHttpRequest::set_http_header(const std::string& name,

@@ -290,16 +290,7 @@ CommMessageOut *RPCServerTask<RPCREQ, RPCRESP>::message_out()
 	int status_code = this->worker.server_serialize();
 
 	if (status_code == RPCStatusOK)
-	{
 		status_code = this->resp.compress();
-		if (status_code == RPCStatusOK)
-		{
-			if (!this->resp.serialize_meta())
-				status_code = RPCStatusMetaError;
-		}
-	}
-
-	this->resp.set_status_code(status_code);
 
 	// for server, this is the where series->module_data stored
 	RPCModuleData *data = this->mutable_module_data();
@@ -308,6 +299,15 @@ CommMessageOut *RPCServerTask<RPCREQ, RPCRESP>::message_out()
 		module->server_task_end(this, *data);
 
 	this->resp.set_meta_module_data(*data);
+
+	if (status_code == RPCStatusOK)
+	{
+		if (!this->resp.serialize_meta())
+			status_code = RPCStatusMetaError;
+	}
+
+	if (this->resp.get_status_code() == RPCStatusOK)
+		this->resp.set_status_code(status_code);
 
 	if (status_code == RPCStatusOK)
 		return this->WFServerTask<RPCREQ, RPCRESP>::message_out();
@@ -448,12 +448,6 @@ CommMessageOut *RPCClientTask<RPCREQ, RPCRESP>::message_out()
 
 	int status_code = this->req.compress();
 
-	if (status_code == RPCStatusOK)
-	{
-		if (!this->req.serialize_meta())
-			status_code = RPCStatusMetaError;
-	}
-
 	void *series_data = series_of(this)->get_specific(SRPC_MODULE_DATA);
 	RPCModuleData *data = (RPCModuleData *)series_data;
 
@@ -465,6 +459,12 @@ CommMessageOut *RPCClientTask<RPCREQ, RPCRESP>::message_out()
 		module->client_task_begin(this, *data);
 
 	this->req.set_meta_module_data(*data);
+
+	if (status_code == RPCStatusOK)
+	{
+		if (!this->req.serialize_meta())
+			status_code = RPCStatusMetaError;
+	}
 
 	if (status_code == RPCStatusOK)
 		return this->WFClientTask<RPCREQ, RPCRESP>::message_out();
@@ -589,13 +589,14 @@ bool RPCClientTask<RPCREQ, RPCRESP>::get_remote(std::string& ip,
 	struct sockaddr_storage addr;
 	socklen_t addrlen = sizeof (addr);
 
-	ip.resize(INET6_ADDRSTRLEN + 1);
+	char buf[INET6_ADDRSTRLEN + 1] = { 0 };
 
-	if (this->get_peer_addr((struct sockaddr *)&addr, &addrlen) == 0)
+	if (this->get_peer_addr((struct sockaddr *)&addr, &addrlen) == 0 &&
+		RPCCommon::addr_to_string((struct sockaddr *)&addr, buf,
+								   INET6_ADDRSTRLEN + 1, port) == true)
 	{
-		return RPCCommon::addr_to_string((struct sockaddr *)&addr,
-										 (char *)ip.c_str(),
-										 INET6_ADDRSTRLEN + 1, port);
+		ip = buf;
+		return true;
 	}
 
 	return false;
@@ -608,13 +609,14 @@ bool RPCServerTask<RPCREQ, RPCRESP>::get_remote(std::string& ip,
 	struct sockaddr_storage addr;
 	socklen_t addrlen = sizeof (addr);
 
-	ip.resize(INET6_ADDRSTRLEN + 1);
+	char buf[INET6_ADDRSTRLEN + 1] = { 0 };
 
-	if (this->get_peer_addr((struct sockaddr *)&addr, &addrlen) == 0)
+	if (this->get_peer_addr((struct sockaddr *)&addr, &addrlen) == 0 &&
+		RPCCommon::addr_to_string((struct sockaddr *)&addr, buf,
+								   INET6_ADDRSTRLEN + 1, port) == true)
 	{
-		return RPCCommon::addr_to_string((struct sockaddr *)&addr,
-										 (char *)ip.c_str(),
-										 INET6_ADDRSTRLEN + 1, port);
+		ip = buf;
+		return true;
 	}
 
 	return false;

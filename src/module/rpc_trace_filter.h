@@ -246,9 +246,13 @@ public:
 		this->filter_policy.set_report_interval(msec);
 	}
 
-	// for client level attributes, such as ProviderID
+	// attributes for client level, such as ProviderID
 	void add_attributes(const std::string& key, const std::string& value);
 	size_t clear_attributes();
+
+	// attributes for each span
+	void add_span_attributes(const std::string& key, const std::string& value);
+	size_t clear_span_attributes();
 
 private:
 	std::string url;
@@ -256,12 +260,15 @@ private:
 	int retry_max;
 
 	RPCTraceFilterPolicy filter_policy;
-	std::mutex mutex;
-	std::unordered_map<std::string, std::string> attributes;
 	google::protobuf::Message *report_req;
 	std::unordered_map<std::string, google::protobuf::Message *> report_map;
 	bool report_status;
 	size_t report_span_count;
+
+protected:
+	std::mutex mutex;
+	std::unordered_map<std::string, std::string> attributes;
+	std::unordered_map<std::string, std::string> span_attributes;
 
 private:
 	SubTask *create(RPCModuleData& span) override;
